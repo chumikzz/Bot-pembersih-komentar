@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+<head><title>Bot Penghapus Komentar Spam</title></head>
+<body>
+  <h1>Bot Penghapus Komentar Spam YouTube</h1>
+  {% if authorized %}
+    <form action="/clean" method="post">
+      <label>Jumlah video yang dicek:</label>
+      <input type="number" name="video_limit" value="5" min="1" max="50">
+      <br><br>
+      <button type="submit">🚮 Bersihkan Komentar Spam</button>
+    </form>
+    <br>
+    <a href="/logout">Logout</a>
+  {% else %}
+    <a href="/login">🔑 Login dengan Google</a>
+  {% endif %}
+</body>
+</html>
