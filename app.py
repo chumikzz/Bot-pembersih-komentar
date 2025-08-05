@@ -1,6 +1,16 @@
 import os
 import re
 import json
+
+# --- Pastikan client_secret.json dibuat sebelum Flask dijalankan ---
+client_secret_content = os.getenv("CLIENT_SECRET_JSON")
+if client_secret_content:
+    with open("client_secret.json", "w") as f:
+        f.write(client_secret_content)
+    print("✅ client_secret.json berhasil dibuat")
+else:
+    print("⚠️ CLIENT_SECRET_JSON tidak ditemukan di environment variables!")
+
 from flask import Flask, redirect, request, session, url_for, render_template
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
@@ -13,22 +23,19 @@ if os.environ.get("RAILWAY_ENVIRONMENT"):
 else:
     os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"  # Allow HTTP locally
 
-# Create client_secret.json from environment variable if provided
-if os.getenv("CLIENT_SECRET_JSON"):
-    with open("client_secret.json", "w") as f:
-        f.write(os.getenv("CLIENT_SECRET_JSON"))
-
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "your_secret_key")
 
 # Kata kunci spam
-SPAM_KEYWORDS = [ 'pulau','pulauwin','pluto','plut088','pluto88','probet855',
+SPAM_KEYWORDS = [
+    'pulau','pulauwin','pluto','plut088','pluto88','probet855',
     'mona','mona4d','alexis17','soundeffect','mudahwin',
     'akunpro','boterpercaya','maxwin','pulau777','weton88',
     'plutowin','plutowinn','pluto8','pulowin','pulauw','plu88',
     'pulautoto','tempatnyaparapemenangsejatiberkumpul',
     'bahkandilaguremix','bergabunglahdenganpulau777',
-    '퓟퓤퓛퓐퓤퓦퓘퓝','홿횄홻홰횄횆홸홽']
+    '퓟퓤퓛퓐퓤퓦퓘퓝','홿횄홻홰횄횆홸홽'
+]
 
 CLIENT_SECRETS_FILE = "client_secret.json"
 SCOPES = ["https://www.googleapis.com/auth/youtube.force-ssl"]
