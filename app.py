@@ -1,16 +1,7 @@
 import os
 import re
 import json
-
-# --- Pastikan client_secret.json dibuat sebelum Flask dijalankan ---
-client_secret_content = os.getenv("CLIENT_SECRET_JSON")
-if client_secret_content:
-    with open("client_secret.json", "w") as f:
-        f.write(client_secret_content)
-    print("✅ client_secret.json berhasil dibuat")
-else:
-    print("⚠️ CLIENT_SECRET_JSON tidak ditemukan di environment variables!")
-
+import base64
 from flask import Flask, redirect, request, session, url_for, render_template
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
@@ -18,29 +9,31 @@ import google.auth.transport.requests
 from google.oauth2.credentials import Credentials
 
 # --- Railway & Local Config ---
+# Untuk development (HTTP) vs production (HTTPS)
 if os.environ.get("RAILWAY_ENVIRONMENT"):
-    os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "0"  # Enforce HTTPS in Railway
-    REDIRECT_URI = "https://bot-pembersih-komentar-production.up.railway.app/oauth2callback"
+    os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "0"  # Enforce HTTPS di Railway
 else:
-    os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"  # Allow HTTP locally
-    REDIRECT_URI = None
+    os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"  # Allow HTTP lokal
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "your_secret_key")
 
-# Kata kunci spam
-SPAM_KEYWORDS = [
-    'pulau','pulauwin','pluto','plut088','pluto88','probet855',
-    'mona','mona4d','alexis17','soundeffect','mudahwin',
-    'akunpro','boterpercaya','maxwin','pulau777','weton88',
-    'plutowin','plutowinn','pluto8','pulowin','pulauw','plu88',
-    'pulautoto','tempatnyaparapemenangsejatiberkumpul',
-    'bahkandilaguremix','bergabunglahdenganpulau777',
-    '퓟퓤퓛퓐퓤퓦퓘퓝','홿횄홻홰횄횆홸홽'
-]
+# Load dan decode Base64 client secret JSON dari env var
+b64 = os.getenv("CLIENT_SECRET_B64")
+if not b64:
+    raise RuntimeError("Env var CLIENT_SECRET_B64 belum diset dengan Base64 JSON YouTube OAuth client secret.")
+try:
+    decoded = base64.b64decode(b64).decode('utf-8')
+    client_config = json.loads(decoded)
+except Exception as e:
+    raise RuntimeError(f"Gagal decode CLIENT_SECRET_B64: {e}")
 
-CLIENT_SECRETS_FILE = "client_secret.json"
 SCOPES = ["https://www.googleapis.com/auth/youtube.force-ssl"]
+
+# SPAM keywords\ nSPAM_KEYWORDS = [
+    'pulau','pulauwin','pluto','plut088','pluto88','probet855',
+    # ... tambahkan lagi sesuai kebutuhan
+]
 
 @app.route("/")
 def index():
@@ -48,95 +41,78 @@ def index():
 
 @app.route("/login")
 def login():
-    flow = Flow.from_client_secrets_file(
-        CLIENT_SECRETS_FILE,
+    flow = Flow.from_client_config(
+        client_config,
         scopes=SCOPES,
-        redirect_uri=REDIRECT_URI or url_for("oauth2callback", _external=True),
+        redirect_uri=url_for("oauth2callback", _external=True)
     )
     auth_url, _ = flow.authorization_url(prompt="consent")
     return redirect(auth_url)
 
 @app.route("/oauth2callback")
 def oauth2callback():
-    flow = Flow.from_client_secrets_file(
-        CLIENT_SECRETS_FILE,
+    flow = Flow.from_client_config(
+        client_config,
         scopes=SCOPES,
-        redirect_uri=REDIRECT_URI or url_for("oauth2callback", _external=True),
+        redirect_uri=url_for("oauth2callback", _external=True)
     )
     flow.fetch_token(authorization_response=request.url)
 
-    credentials = flow.credentials
+    creds = flow.credentials
     session["credentials"] = {
-        "token": credentials.token,
-        "refresh_token": credentials.refresh_token,
-        "token_uri": credentials.token_uri,
-        "client_id": credentials.client_id,
-        "client_secret": credentials.client_secret,
-        "scopes": credentials.scopes,
+        "token": creds.token,
+        "refresh_token": creds.refresh_token,
+        "token_uri": creds.token_uri,
+        "client_id": creds.client_id,
+        "client_secret": creds.client_secret,
+        "scopes": creds.scopes,
     }
     return redirect(url_for("index"))
 
 @app.route("/clean", methods=["POST"])
 def clean_comments():
-    creds_data = session.get("credentials")
-    if not creds_data:
+    data = session.get("credentials")
+    if not data:
         return redirect(url_for("login"))
 
-    creds = Credentials(**creds_data)
+    creds = Credentials(**data)
     youtube = build("youtube", "v3", credentials=creds)
 
-    # Ambil jumlah video yang diminta user
+    # Batas video yang dicek
     try:
-        video_limit = int(request.form.get("video_limit", 5))
-    except ValueError:
-        video_limit = 5
+        limit = int(request.form.get("video_limit", 5))
+    except:
+        limit = 5
 
-    # Ambil Channel ID milik user
-    channel_response = youtube.channels().list(
-        part="id",
-        mine=True
-    ).execute()
-    if not channel_response.get("items"):
-        return "❌ Channel tidak ditemukan untuk akun ini."
-    channel_id = channel_response["items"][0]["id"]
+    # Ambil channel ID
+    res = youtube.channels().list(part="id", mine=True).execute()
+    if not res.get("items"):
+        return "❌ Channel tidak ditemukan"
+    cid = res["items"][0]["id"]
 
-    # Ambil daftar video terbaru
-    videos_response = youtube.search().list(
-        part="id",
-        channelId=channel_id,
-        maxResults=video_limit,
-        order="date",
-        type="video"
-    ).execute()
-
-    video_ids = [item["id"]["videoId"] for item in videos_response.get("items", [])]
+    vids = youtube.search().list(
+        part="id", channelId=cid, maxResults=limit, order="date", type="video"
+    ).execute().get("items", [])
+    video_ids = [v["id"]["videoId"] for v in vids]
 
     deleted = 0
-    deleted_logs = []
-
-    # Loop tiap video dan ambil komentarnya
+    logs = []
     for vid in video_ids:
-        comments_response = youtube.commentThreads().list(
-            part="snippet",
-            videoId=vid,
-            maxResults=50,
-            textFormat="plainText"
-        ).execute()
-
-        for item in comments_response.get("items", []):
-            comment = item["snippet"]["topLevelComment"]["snippet"]["textDisplay"]
-            comment_id = item["snippet"]["topLevelComment"]["id"]
-            video_url = f"https://www.youtube.com/watch?v={vid}"
-            if any(keyword.lower() in comment.lower() for keyword in SPAM_KEYWORDS):
+        threads = youtube.commentThreads().list(
+            part="snippet", videoId=vid, maxResults=50, textFormat="plainText"
+        ).execute().get("items", [])
+        for it in threads:
+            c = it["snippet"]["topLevelComment"]["snippet"]["textDisplay"]
+            cid = it["snippet"]["topLevelComment"]["id"]
+            if any(k.lower() in c.lower() for k in SPAM_KEYWORDS):
                 youtube.comments().setModerationStatus(
-                    id=comment_id,
-                    moderationStatus="rejected"
+                    id=cid, moderationStatus="rejected"
                 ).execute()
                 deleted += 1
-                deleted_logs.append(f"- {comment} (Video: {video_url})")
+                logs.append(f"- {c} (https://youtu.be/{vid})")
 
-    log_text = "<br>".join(deleted_logs) if deleted_logs else "Tidak ada komentar spam yang dihapus."
-    return f"✅ {deleted} komentar spam berhasil dihapus dari {len(video_ids)} video terakhir.<br><br><b>Log:</b><br>{log_text}"
+    log_html = '<br>'.join(logs) if logs else 'Tidak ada spam dihapus.'
+    return f"✅ {deleted} komentar dihapus dari {len(video_ids)} video.<br><b>Detail:</b><br>{log_html}"
 
 @app.route("/logout")
 def logout():
