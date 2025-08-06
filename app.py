@@ -20,8 +20,10 @@ from google.oauth2.credentials import Credentials
 # --- Railway & Local Config ---
 if os.environ.get("RAILWAY_ENVIRONMENT"):
     os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "0"  # Enforce HTTPS in Railway
+    REDIRECT_URI = "https://bot-pembersih-komentar-production.up.railway.app/oauth2callback"
 else:
     os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"  # Allow HTTP locally
+    REDIRECT_URI = None
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "your_secret_key")
@@ -49,7 +51,7 @@ def login():
     flow = Flow.from_client_secrets_file(
         CLIENT_SECRETS_FILE,
         scopes=SCOPES,
-        redirect_uri=url_for("oauth2callback", _external=True),
+        redirect_uri=REDIRECT_URI or url_for("oauth2callback", _external=True),
     )
     auth_url, _ = flow.authorization_url(prompt="consent")
     return redirect(auth_url)
@@ -59,7 +61,7 @@ def oauth2callback():
     flow = Flow.from_client_secrets_file(
         CLIENT_SECRETS_FILE,
         scopes=SCOPES,
-        redirect_uri=url_for("oauth2callback", _external=True),
+        redirect_uri=REDIRECT_URI or url_for("oauth2callback", _external=True),
     )
     flow.fetch_token(authorization_response=request.url)
 
